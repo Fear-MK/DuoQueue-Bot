@@ -75,19 +75,47 @@ def get_mogilist_str(message):
         to_send+="There currently no active mogis.\n\n"
     else:
         for event_id, event in events.items():
-            line=f"<#{event_id}> - {str(len(event.queue_flat))}/12"
-            if event.full:
-                full_mogis+=1
-                time_since_filled = datetime.now()-event.fill_time
-                time_since_filled = time_since_filled.total_seconds()//60
-                event_format = str(event.team_size)+'v'+str(event.team_size)
-                line += f" - {event_format} - {time_since_filled}"
-            if message.channel.name[-2:] == "lu":
-                line+="\n"+", ".join(event.queue_flat)
+            if not len(event.queue_flat) == 0:
+                line=f"<#{event_id}> - {str(len(event.queue_flat))}/12"
+                if event.full:
+                    full_mogis+=1
+                    time_since_filled = datetime.now()-event.fill_time
+                    time_since_filled = time_since_filled.total_seconds()//60
+                    event_format = str(event.team_size)+'v'+str(event.team_size)
+                    line += f" - {event_format} - {time_since_filled}"
+                if message.channel.name[-2:] == "lu":
+                    line+="\n"+", ".join(event.queue_flat)
             mogi_lists+=line+"\n\n"
         to_send+=f"There are {len(events)} active mogi and {full_mogis} full mogi.\n\n{mogi_lists}"
     to_send+=f"Last updated at <t:{int(current_unix_epoch_timestamp())}:T>\nThis will update every 30 seconds."
     return to_send
+
+async def remove_players_from_all_lineups(players, channel_id):
+    for id in list(events.keys()):
+        event = get_event(id)
+        queue_flat, unconfirmed_flattened=event.queue_flat, event.unconfirmed_flattened #requires static array
+        removed_players=[]
+        removed_unconfirmed_players=[]
+        for player in players:
+            if player in queue_flat[:12] and event.full:
+                pass
+
+            elif (player in queue_flat[12:]) or (player in queue_flat and not event.full):
+                await event.remove(event.channel, event.queue_flat.index(player)+1, True)
+                removed_players.append(player)
+                
+            elif player in unconfirmed_flattened:
+                await event.remove_team_unconfirmed(player)
+                removed_unconfirmed_players.append(player)
+            else:
+                print(player+" not found")
+
+        if len(removed_unconfirmed_players)!=0:
+            await event.channel.send(f"{', '.join(removed_unconfirmed_players)} has been removed from unconfirmed squads due to a mogi filling in <#{channel_id}>")
+
+        if len(removed_players)!=0:
+            await event.channel.send(f"{', '.join(removed_players)} has been removed from the lineup due to a mogi filling in <#{channel_id}>")
+
 
 class Event:
     def __init__(self, channel_id):
@@ -96,8 +124,8 @@ class Event:
         self.team_size = 2
         self.teams_per_room = 6
 
-        self.queue = [] #["Greg", ["joe", "Samurailemon3250"], "frozuppy :3", "baked been", ["Kasperinos", ":fish:"], "Carl", ["Schwoz", "some giga random"]] A list of dictionaries that contain the squads in the lineup
-        self.queue_flat = [] #"Greg", "joe", "Samurailemon3250", "frozuppy :3", "baked been", "Kasperinos", ":fish:", "Carl", "Schwoz", "some giga random" The queue, but just an array with all players, only used for the bot
+        self.queue = []
+        self.queue_flat = []
         self.queue_num = 0
         self.unconfirmed_squads = []
         self.unconfirmed_flattened = []
@@ -182,9 +210,12 @@ class Event:
 
     async def event_full(self, ctx):
         self.full=True
-        self.fill_time = datetime.now()
+        fill_time=datetime.now()
+        self.fill_time = fill_time
         solo_players=[]
         team_players=[]
+
+        await remove_players_from_all_lineups(self.queue_flat[:12], self.channel.id)
 
         player_objs = fetch_user_objs(ctx, self.queue_flat[:12])
         await ctx.send(f"There are 12 players in the mogi.\nType `!l` to get a list of the current lineup.\n\n{', '.join([user.mention for user in player_objs])} Mogi has 12 players")
@@ -378,39 +409,41 @@ class Event:
         else:
             await ctx.send(f"{name} is already dropped from the mogi {str(self.queue_num)} players remaining in the mogi.")
 
-    async def remove(self, ctx, number, bypass):
-        if not bypass:
-            if not is_moderator(ctx):
-                await ctx.send("You must be a moderator to use this command.")
+    async def remove(self, channel, number, bypass):
+        if bypass:
+            pass
+        elif not is_moderator(channel): #so the bot can use this function
+            await channel.send("You must be a moderator to use this command.")
 
         if not self.active:
-            await ctx.send("There is no mogi currently active in this channel, use `!start` to begin one.")
+            await channel.send("There is no mogi currently active in this channel, use `!start` to begin one.")
             return      
 
         if number == None: #If !r has no arguments
-            await ctx.send(f"{get_lineup_str(self.queue)}\nTo remove the 4th player on the list, use `!r 4`")
+            await channel.send(f"{get_lineup_str(self.queue)}\nTo remove the 4th player on the list, use `!r 4`")
 
         number=int(number)
 
         if number > len(self.queue_flat) or number < 1:
-            await ctx.send("That number is not on the list. Use `!l` to see the players to remove")
+            await channel.send("That number is not on the list. Use `!l` to see the players to remove")
 
         name=self.queue_flat[number-1]
         for i, item in enumerate(self.queue):
             if isinstance(item, list):
                 if name in item:
                     team=item
-                    users=fetch_user_objs(ctx, item)
+                    users=fetch_user_objs(channel, item)
                     del self.queue[i]
-                    await self.update_queue_num(ctx, -2)
+                    await self.update_queue_num(channel, -2)
                     break
         else:
-            team,users=[name],fetch_user_objs(ctx, [name])
+            team = [name]
+            users= fetch_user_objs(channel, [name])
             self.queue.remove(name)
-            await self.update_queue_num(ctx, -1)
+            await self.update_queue_num(channel, -1)
         self.queue_flat=[x for x in self.queue_flat if x not in team]
-        await ctx.send(f"{', '.join([user.mention for user in users])}, you have been removed from the mogi. {str(len(self.queue_flat))} players remaining.") 
-
+        if not bypass:
+            await channel.send(f"{', '.join([user.mention for user in users])} has been removed from the mogi. {str(len(self.queue_flat))} players remaining.") 
 
 @tasks.loop(seconds=30)
 async def mogilist():
@@ -458,7 +491,7 @@ async def remove(ctx, number):
     if not number.isdigit():
         number=None
     event = get_event(ctx.channel.id)
-    await event.remove(ctx, number)
+    await event.remove(ctx, number, False)
 
 @bot.command(aliases=["c"])
 async def can(ctx):
