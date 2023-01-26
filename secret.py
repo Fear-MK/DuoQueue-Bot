@@ -1,1 +1,1 @@
-bot_key="MTA2NjE1NjUxMzA5NTMxOTYyNQ.GnMsb2.pzBHjmfB1Ggz7ANbnpgwXyYXzyGgcvH08y7Uz0"
+bot_key=""
