@@ -62,10 +62,13 @@ def fetch_user_objs(ctx, names):
 async def create_sticky_messages():
     for id in [mogilist_id, mogilist_lu_id]:
         channel = bot.get_channel(id)
-        await channel.purge()
-        message = await channel.send("There are no mogis active currently.")
-        mogilist_sticky_messages.append(message)
-    mogilist.start()
+        try:
+            sticky_message = await channel.fetch_message(channel.last_message_id)
+            await sticky_message.edit(content="There are no mogis active currently.")
+        except discord.errors.NotFound:
+            sticky_message = await channel.send("There are no mogis active currently.")
+        mogilist_sticky_messages.append(sticky_message)
+    
 
 def get_mogilist_str(message):
     to_send=""
@@ -80,12 +83,12 @@ def get_mogilist_str(message):
                 if event.full:
                     full_mogis+=1
                     time_since_filled = datetime.now()-event.fill_time
-                    time_since_filled = time_since_filled.total_seconds()//60
+                    time_since_filled = int(time_since_filled.total_seconds()//60)
                     event_format = str(event.team_size)+'v'+str(event.team_size)
-                    line += f" - {event_format} - {time_since_filled}"
+                    line += f" - {event_format} - {time_since_filled}m ago"
                 if message.channel.name[-2:] == "lu":
                     line+="\n"+", ".join(event.queue_flat)
-            mogi_lists+=line+"\n\n"
+                mogi_lists+=line+"\n\n"
         to_send+=f"There are {len(events)} active mogi and {full_mogis} full mogi.\n\n{mogi_lists}"
     to_send+=f"Last updated at <t:{int(current_unix_epoch_timestamp())}:T>\nThis will update every 30 seconds."
     return to_send
@@ -108,7 +111,7 @@ async def remove_players_from_all_lineups(players, channel_id):
                 await event.remove_team_unconfirmed(player)
                 removed_unconfirmed_players.append(player)
             else:
-                print(player+" not found")
+                pass
 
         if len(removed_unconfirmed_players)!=0:
             await event.channel.send(f"{', '.join(removed_unconfirmed_players)} has been removed from unconfirmed squads due to a mogi filling in <#{channel_id}>")
@@ -147,12 +150,12 @@ class Event:
                 if players[0] in d.keys() and players[-1] in d.keys():
                     return d
                 return False
-            return None
+        return None
     
     def check_list(self, players):
         for player in players:
             if player in self.queue_flat:
-                return True
+                return player
         return None
 
     async def remove_team_unconfirmed(self, name):
@@ -232,6 +235,8 @@ class Event:
 
         completed_teams=solo_player_teams+team_players
 
+        self.teams_str = get_teams_string(completed_teams)
+
         await ctx.send(f"{get_teams_string(completed_teams)}\n\nDecide a host amongst yourselves.")
 
 
@@ -250,10 +255,10 @@ class Event:
             await ctx.send("There is no mogi currently active in this channel, use !start to begin one.")
             return
         
-        if datetime.now()-self.start_time < timedelta(minutes=40) and not any(x in [role.name for role in ctx.author.roles] for x in moderator_roles):
+        if datetime.now()-self.fill_time < timedelta(minutes=40) and not any(x in [role.name for role in ctx.author.roles] for x in moderator_roles):
             return
         
-        elif datetime.now()-self.start_time > timedelta(minutes=40) and datetime.now()-self.start_time < timedelta(minutes=60) and not ctx.author.name in self.queue_flat:
+        elif datetime.now()-self.fill_time > timedelta(minutes=40) and datetime.now()-self.fill_time < timedelta(minutes=60) and not ctx.author.name in self.queue_flat:
             return
         
         self.active = False
@@ -266,7 +271,7 @@ class Event:
         if not is_moderator(ctx):
             return
 
-        await ctx.send("@ here A mogi has started. Type `!c` if not currently playing")
+        await ctx.send("@here A mogi has started. Type `!c` if not currently playing")
 
     async def ping(self, ctx, number):
         if number == None or number == "":
@@ -276,14 +281,14 @@ class Event:
             return
         else:
             await ctx.message.delete()
-            await ctx.send(f"@ here +{number}")
+            await ctx.send(f"@here +{number}")
 
     async def lineup(self, ctx, permanent):
         lineup_str=get_lineup_str(self.queue)
         if permanent:
-            await ctx.send(f"`Mogi List`\n{lineup_str}\nYou can use `!l` again in 30 seconds" if lineup_str != "" else "There are no players in the mogi.")
+            await ctx.send(f"**Mogi List**\n\n{lineup_str}\nYou can use `!l` again in 30 seconds" if lineup_str != "" else "There are no players in the mogi.")
         else:
-            msg = await ctx.send(f"`Mogi List`\n{lineup_str}\n" if lineup_str != "" else "There are no players in the mogi.")
+            msg = await ctx.send(f"**Mogi List**\n\n{lineup_str}\n" if lineup_str != "" else "There are no players in the mogi.")
             await msg.delete(delay=10)
 
     async def unconfirmed_lineup(self, ctx):
@@ -296,6 +301,10 @@ class Event:
                 line += f" {list(team.keys())[x]}  `{'✓' if list(team.values())[x] == 'Confirmed' else '✘'} {list(team.values())[x]}`"
             output += line + "\n"
         await ctx.send(output)
+
+    async def teams(self, ctx):
+        if self.full == True:
+            await ctx.send(self.teams_str)
     
     async def can(self, ctx, partners):
         if not self.active:
@@ -319,8 +328,8 @@ class Event:
                 return
             
             elif name in self.unconfirmed_flattened:
-                await ctx.send(f"You are in an unconfirmed squad. Check the unconfirmed squads with `!ul` and type `!c @partner` or `!d` to remove yourself from the unconfirmed list.")
-
+                await ctx.send(f"You are in an unconfirmed squad. Check the unconfirmed squads with `!ul` and type `!c @partner` to join the mogi with your squadmate, or `!d` to remove you and your team from the unconfirmed list.")
+                return
             else:
                 self.queue.append(name)
                 self.queue_flat.append(name)
@@ -352,7 +361,7 @@ class Event:
                 await ctx.send("One of the players in your squad is in an unconfirmed squad, please drop before trying the command again.")
                 return
 
-            if checkWaiting == None: #Neither are queued
+            elif checkWaiting == None: #Neither are queued
                 self.unconfirmed_squads.append({squad[-1]: "Confirmed", squad[0]: "Unconfirmed"})
                 self.unconfirmed_flattened.extend(squad)
                 await ctx.send(f"Created a squad with {squad[-1]} and {squad[0]}. {squad[0]} must type `!c @{squad[-1]}` to join the mogi.")
@@ -395,7 +404,7 @@ class Event:
                     if name in item:
                         team=item
                         user=fetch_user_objs(ctx, [item[1]] if item[0] == name else [item[0]])
-                        await ctx.send(f"{user[0].mention}, your teammate has dropped from the lineup.")
+                        await ctx.send(f"{user[0].mention}, your teammate has dropped from the lineup, so you have been removed.")
                         del self.queue[i]
                         await self.update_queue_num(ctx, -2)
                         break
@@ -512,12 +521,17 @@ async def lineup(ctx):
     event = get_event(ctx.channel.id)
     await event.lineup(ctx, True)
 
-
 @bot.command()
 @commands.cooldown(1, 15, commands.BucketType.channel)
 async def s(ctx):
     event = get_event(ctx.channel.id)
     await event.lineup(ctx, False)
+
+@bot.command()
+@commands.cooldown(1, 15, commands.BucketType.channel)
+async def teams(ctx):
+    event = get_event(ctx.channel.id)
+    await event.teams(ctx)
 
 @bot.command(aliases=["ul"])
 @commands.cooldown(1,15)
@@ -528,7 +542,24 @@ async def unconfirmedlineup(ctx):
 @bot.event
 async def on_ready():
     await create_sticky_messages()
+    mogilist.start()
     activity_check.start()
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, discord.ext.commands.errors.CommandNotFound):
+        return
+    if isinstance(error, discord.ext.commands.errors.MissingAnyRole):
+        await ctx.send(error)
+        return
+    else:
+        await ctx.send(f"An unknown error occurred. Please ping Fear if the error persists.")
+        embedVar = discord.Embed(title=error,colour=discord.Color.red())
+        embedVar.set_author(
+            name=f'Channel: {ctx.channel.name}',
+        )
+        channel=bot.get_channel(1011055865895329918) #dev-bot-spam
+        await channel.send(embed=embedVar)
 
 print("Bot Started")
 bot.run(bot_key)
