@@ -10,7 +10,6 @@ from Shared import *
 
 intents = discord.Intents.all()
 
-
 bot = commands.Bot(command_prefix='!', intents=intents, help_command=None, case_insensitive=True)
 
 events={}
