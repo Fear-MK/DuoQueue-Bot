@@ -70,11 +70,10 @@ async def create_sticky_messages():
     
 
 def get_mogilist_str(message):
-    to_send=""
     mogi_lists=""
     full_mogis=0
     if len(events) == 0:
-        to_send+="There currently no active mogis.\n\n"
+        to_send="There currently no active mogis.\n\n"
     else:
         for event_id, event in events.items():
             if not len(event.queue_flat) == 0:
@@ -88,8 +87,8 @@ def get_mogilist_str(message):
                 if message.channel.name[-2:] == "lu":
                     line+="\n"+", ".join(event.queue_flat)
                 mogi_lists+=line+"\n\n"
-        to_send+=f"There are {len(events)} active mogi and {full_mogis} full mogi.\n\n{mogi_lists}"
-    to_send+=f"Last updated at <t:{int(current_unix_epoch_timestamp())}:T>\nThis will update every 30 seconds."
+        to_send = f"There are {len(events)} active mogi and {full_mogis} full mogi.\n\n{mogi_lists}"
+    to_send += f"Last updated at <t:{str(int(current_unix_epoch_timestamp()))}:T>\nThis will update every 30 seconds."
     return to_send
 
 async def remove_players_from_all_lineups(players, channel_id):
@@ -212,8 +211,7 @@ class Event:
 
     async def event_full(self, ctx):
         self.full=True
-        fill_time=datetime.now()
-        self.fill_time = fill_time
+        self.fill_time = datetime.now()
         solo_players=[]
         team_players=[]
 
@@ -253,18 +251,21 @@ class Event:
         if self.active == False:
             await ctx.send("There is no mogi currently active in this channel, use !start to begin one.")
             return
-        
-        if datetime.now()-self.fill_time < timedelta(minutes=40) and not any(x in [role.name for role in ctx.author.roles] for x in moderator_roles):
-            return
-        
-        elif datetime.now()-self.fill_time > timedelta(minutes=40) and datetime.now()-self.fill_time < timedelta(minutes=60) and not ctx.author.name in self.queue_flat:
-            return
-        
-        self.active = False
-        self.queue = []
-        self.queue_flat = []
 
-        await ctx.send("The current mogi has been ended")
+        if not self.full:
+            if not is_moderator():
+              await ctx.send("You must get a moderator to end the mogi, as it is not full.")
+              return
+      
+        elif datetime.now()-self.fill_time < timedelta(minutes=40) and not is_moderator:
+            return
+        
+        elif datetime.now()-self.fill_time > timedelta(minutes=40) and datetime.now() - self.fill_time < timedelta(minutes=60) and not ctx.author.name in self.queue_flat:
+            return
+        
+        events.pop(self.channel)
+
+        
     
     async def next(self, ctx):
         if not is_moderator(ctx):
@@ -272,8 +273,11 @@ class Event:
 
         await ctx.send("@here A mogi has started. Type `!c` if not currently playing")
 
-    async def ping(self, ctx, number):
-        if number == None or number == "":
+    async def ping(self, ctx, args):
+        if not is_moderator(ctx):
+            await ctx.send("This is a ")
+
+        if len(args) == 0:
             number = 12-len(self.queue_flat)
 
         if number > 6:
@@ -318,7 +322,8 @@ class Event:
         squad=partners
 
         if name in self.queue_flat:
-            await ctx.send()
+            await ctx.send("You are already in the mogi. Please drop before trying to can again.")
+            return
 
         if len(partners) < 2:
             checkList = self.check_list([name])
@@ -490,16 +495,18 @@ async def endstartnext(ctx):
 
 @bot.command(aliases=["p"])
 @commands.cooldown(1, 900, commands.BucketType.channel)
-async def ping(ctx, number):
+async def ping(ctx, *args):
     event = get_event(ctx.channel.id)
-    await event.ping(ctx, number)
+    await event.ping(ctx, args)
 
 @bot.command(aliases=["r"])
-async def remove(ctx, number):
-    if not number.isdigit():
-        number=None
+async def remove(ctx, *args):
+    if len(args) == 0:
+      await ctx.send("")
+    if not args[0].isdigit():
+        await ctx.send("")
     event = get_event(ctx.channel.id)
-    await event.remove(ctx, number, False)
+    await event.remove(ctx, args[0], False)
 
 @bot.command(aliases=["c"])
 async def can(ctx):
@@ -546,14 +553,18 @@ async def on_ready():
 
 @bot.event
 async def on_command_error(ctx, error):
-    if isinstance(error, discord.ext.commands.errors.CommandNotFound):
+    if isinstance(error, commands.errors.CommandNotFound):
         return
-    if isinstance(error, discord.ext.commands.errors.MissingAnyRole):
+    if isinstance(error, commands.errors.MissingAnyRole):
         await ctx.send(error)
         return
+    if isinstance(error, commands.CommandOnCooldown):
+        await ctx.send("This command is on cooldown.")
+        return
+     
     else:
-        await ctx.send(f"An unknown error occurred. Please ping Fear if the error persists.")
-        embedVar = discord.Embed(title=error,colour=discord.Color.red())
+        await ctx.send(f"An unknown error occurred. Please check #known issues and message Fear if the error is not there")
+        embedVar = discord.Embed(url=ctx.message.jump_url, title=error,colour=discord.Color.red())
         embedVar.set_author(
             name=f'Channel: {ctx.channel.name}',
         )
