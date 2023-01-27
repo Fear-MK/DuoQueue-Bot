@@ -253,19 +253,17 @@ class Event:
             return
 
         if not self.full:
-            if not is_moderator():
+            if not is_moderator(ctx):
               await ctx.send("You must get a moderator to end the mogi, as it is not full.")
               return
       
-        elif datetime.now()-self.fill_time < timedelta(minutes=40) and not is_moderator:
+        elif datetime.now()-self.fill_time < timedelta(minutes=40) and not is_moderator(ctx):
             return
         
         elif datetime.now()-self.fill_time > timedelta(minutes=40) and datetime.now() - self.fill_time < timedelta(minutes=60) and not ctx.author.name in self.queue_flat:
             return
         
-        events.pop(self.channel)
-
-        
+        events.pop(self.channel.id)
     
     async def next(self, ctx):
         if not is_moderator(ctx):
@@ -502,9 +500,11 @@ async def ping(ctx, *args):
 @bot.command(aliases=["r"])
 async def remove(ctx, *args):
     if len(args) == 0:
-      await ctx.send("")
+        await ctx.send("You need to specify a number indicated by `!l`.")
+        return
     if not args[0].isdigit():
-        await ctx.send("")
+        await ctx.send("You need to specify a number indicated by `!l`.")
+        return
     event = get_event(ctx.channel.id)
     await event.remove(ctx, args[0], False)
 
