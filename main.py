@@ -569,7 +569,7 @@ async def on_command_error(ctx, error):
         return
      
     else:
-        await ctx.send(f"An unknown error occurred. Please check #known issues and message Fear if the error is not there")
+        await ctx.send(f"An unknown error occurred. Please check <#1068047135284662332> and message Fear if the error is not there")
         embedVar = discord.Embed(url=ctx.message.jump_url, title=error,colour=discord.Color.red())
         embedVar.set_author(
             name=f'Channel: {ctx.channel.name}',
