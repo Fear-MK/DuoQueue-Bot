@@ -487,7 +487,7 @@ async def next(ctx):
 @bot.command(aliases=["esn"])
 async def endstartnext(ctx):
     event = get_event(ctx.channel.id)
-    await event.end_mogi(ctx)
+    await asyncio.gather(event.end_mogi(ctx), asyncio.sleep(1))
     await event.start_mogi(ctx)
     await event.next(ctx)
 
@@ -550,6 +550,12 @@ async def on_ready():
     await create_sticky_messages()
     mogilist.start()
     activity_check.start()
+    embedVar = discord.Embed(title="Bot is now running",colour=discord.Color.green())
+    embedVar.set_author(
+            name=f'DuoQueue Bot',
+        )
+    channel=bot.get_channel(1011055865895329918) #dev-bot-spam
+    await channel.send(embed=embedVar)
 
 @bot.event
 async def on_command_error(ctx, error):
@@ -571,5 +577,4 @@ async def on_command_error(ctx, error):
         channel=bot.get_channel(1011055865895329918) #dev-bot-spam
         await channel.send(embed=embedVar)
 
-print("Bot Started")
 bot.run(bot_key)
