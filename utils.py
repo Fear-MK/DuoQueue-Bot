@@ -7,12 +7,8 @@ from Shared import moderator_roles
 from main import Channel
 
 
-def is_moderator(ctx_or_channel: ApplicationContext | Channel) -> bool:
-    # explicit type check because this was unclear before (really, channel should never be passed in)
-    if isinstance(ctx_or_channel, Channel):
-        return False
-
-    member = ctx_or_channel.author
+def is_moderator(ctx: ApplicationContext) -> bool:
+    member = ctx.author
     # this check is here for type safety; users do not have the roles attribute
     if not isinstance(member, Member):
         return False
