@@ -1,1 +1,1 @@
-bot_key=""
+bot_key = ""
