@@ -2,10 +2,9 @@ import asyncio
 from datetime import datetime, timedelta
 import random
 from typing import List
-
-from discord import ApplicationContext
-from main import Channel
-from utils import is_moderator, fetch_user_objs, get_teams_string, get_lineup_str
+from discord import ApplicationContext, Member
+from model.types import Channel, SquadStatus, Squad, SquadPlayer
+from utils import fetch_user_objs, get_teams_string, get_lineup_str
 
 
 class Event:
@@ -16,11 +15,10 @@ class Event:
         self.team_size = 2
         self.teams_per_room = 6
 
-        self.queue: List[str | List[str]] = []
+        self.queue: List[Squad | str] = []
         self.queue_flat: List[str] = []
         self.queue_num = 0
-        self.unconfirmed_squads = []
-        self.unconfirmed_flattened = []
+        self.unconfirmed_squads: List[Squad] = []
 
         self.waiting_for_response = []
 
@@ -33,13 +31,24 @@ class Event:
 
     # NON-DISCORD FUNCTIONS
 
-    def check_waiting(self, players):
-        for d in self.unconfirmed_squads:
-            if players[0] in d.keys() or players[-1] in d.keys():
-                if players[0] in d.keys() and players[-1] in d.keys():
-                    return d
-                return False
-        return None
+    def check_waiting(self, players: List[str]) -> SquadStatus:
+        # important convention: the caller is always players[-1]
+        caller_name = players[-1]
+        partner_name = players[0]
+
+        for squad in self.unconfirmed_squads:
+            has_caller = squad.has_player(caller_name)
+            has_partner = squad.has_player(partner_name)
+            if has_caller and not has_partner:
+                return SquadStatus.CALLER_IN_OTHER_SQUAD
+            if has_caller:
+                caller = squad.get_player(caller_name)
+                if caller.confirmed:
+                    return SquadStatus.WAITING_ON_PARTNER
+                else:
+                    return SquadStatus.CONFIRMING
+
+        return SquadStatus.NEITHER_UNCONFIRMED
 
     def check_list(self, players):
         for player in players:
@@ -47,24 +56,15 @@ class Event:
                 return player
         return None
 
-    async def remove_team_unconfirmed(self, name):
-        squads = [list(d.keys()) for d in self.unconfirmed_squads]
-        for i, array in enumerate(squads):
-            if name in array:
-                arr = array
-                index = i
-                break
-        else:
-            return
-        del self.unconfirmed_squads[index]
-        self.unconfirmed_flattened = [x for x in self.unconfirmed_flattened if x not in arr]
+    async def remove_team_unconfirmed(self, name: str):
+        updated_squads = [squad for squad in self.unconfirmed_squads if not squad.has_player(name)]
+        self.unconfirmed_squads = updated_squads
 
-    async def update_queue_num(self, ctx, number):
+    async def update_queue_num(self, number):
         if self.queue_num + number == 12 and not self.queue_num > 12:
             self.queue_num += number
             self.full = True
             self.fill_time = datetime.now()
-            await self.event_full(ctx)
         else:
             self.queue_num += number
 
@@ -89,6 +89,10 @@ class Event:
                 pass
             last_message_time = await self.get_last_message_time(user)
 
+            # could be None
+            if not last_message_time:
+                continue
+
             if current_time - last_message_time >= timedelta(minutes=30):
                 inactive_users.append(user)
                 self.waiting_for_response.append(user)
@@ -112,10 +116,10 @@ class Event:
             f"There are 12 players in the mogi.\nType `!l` to get a list of the current lineup.\n\n{', '.join([user.mention for user in player_objs])} Mogi has 12 players")
 
         for team in self.queue:
-            if not isinstance(team, list):
-                solo_players.append(team)
+            if isinstance(team, Squad):
+                team_players.append([team.player_1.name, team.player_2.name])
             else:
-                team_players.append(team)
+                solo_players.append(team)
 
         random.shuffle(solo_players)
 
@@ -130,7 +134,7 @@ class Event:
     # DISCORD COMMANDS BEGIN
 
     async def start_mogi(self, ctx):
-        if self.active == True:
+        if self.active:
             await ctx.send("You must end the current event before starting a new one.")
             return
         self.active = True
@@ -138,15 +142,16 @@ class Event:
             f"A new {str(self.team_size)}v{str(self.team_size)} mogi has started, type !c to join solo, or tag a partner to join as a team.")
 
     async def next(self, ctx):
-        if not is_moderator(ctx):
+        if self.active:
+            await ctx.send("There is already an active mogi. Use `!esn` if you'd like to start a new one.")
             return
 
+        # Not sure if I understand the purpose of this. It doesn't actually start a new mogi...
         await ctx.send("@here A mogi has started. Type `!c` if not currently playing")
 
-    async def ping(self, ctx, number: int):
+    async def ping(self, ctx):
 
-        if number == 0:
-            number = 12 - len(self.queue_flat)
+        number = 12 - len(self.queue_flat)
 
         if number > 6:
             return
@@ -156,6 +161,9 @@ class Event:
 
     async def lineup(self, ctx: ApplicationContext, permanent: bool):
         lineup_str = get_lineup_str(self.queue)
+        if not self.active:
+            await ctx.send("There is no active mogi in this channel. Use `!s` to start one")
+            return
         if permanent:
             await ctx.send(
                 f"**Mogi List**\n\n{lineup_str}\nYou can use `!l` again in 30 seconds" if lineup_str != "" else "There are no players in the mogi.")
@@ -166,99 +174,135 @@ class Event:
 
     async def unconfirmed_lineup(self, ctx):
         output = "`Unconfirmed Squads`\n"
-        if len(self.unconfirmed_flattened) == 0:
+        if len(self.unconfirmed_squads) == 0:
             await ctx.send("There are no unconfirmed squads.")
-        for i, team in enumerate(self.unconfirmed_squads, start=1):
-            line = f"`{str(i)}.`"
-            for x in range(2):
-                line += f" {list(team.keys())[x]}  `{'✓' if list(team.values())[x] == 'Confirmed' else '✘'} {list(team.values())[x]}`"
+            return
+        for i, squad in enumerate(self.unconfirmed_squads):
+            line = f"`{str(i + 1)}.`"
+            # player 1
+            line += f" {squad.player_1.name}  `{'✓ Confirmed' if squad.player_1.confirmed else '✘ Unconfirmed'}` / "
+            # player 2
+            line += f" {squad.player_2.name}  `{'✓ Confirmed' if squad.player_2.confirmed else '✘ Unconfirmed'}`"
             output += line + "\n"
         await ctx.send(output)
 
-    async def teams(self, ctx):
-        if self.full == True:
+    async def post_teams(self, ctx):
+        if self.full:
             await ctx.send(self.teams_str)
+        await ctx.send("The mogi is not full yet.")
 
-    async def can(self, ctx: ApplicationContext, partners):
+    async def can(self, ctx: ApplicationContext, squad_names: List[str]) -> int:
         if not self.active:
             await ctx.send("There is no mogi currently active in this channel, use !start to begin one.")
-            return
+            return 0
 
         if self.queue_num >= 15:
             await ctx.send("Unable to join the mogi. The mogi currently has 15 players.")
+            return 0
 
         name = ctx.message.author.display_name
-        partners.append(name)
-        squad = partners
+        # add the caller to the squad
+        squad_names.append(name)
 
         if name in self.queue_flat:
+            # This implies that someone has to drop and !c while pinging someone else to duo
             await ctx.send("You are already in the mogi. Please drop before trying to can again.")
-            return
+            return 0
 
-        if len(partners) < 2:
-            checkList = self.check_list([name])
-            if checkList == True:
+        players_in_event: List[str] = [player for player in squad_names if player in self.queue_flat]
+        # if only one person is queuing
+        if len(squad_names) < 2:
+            if len(players_in_event) > 0:
                 await ctx.send(f"{name} is already in the mogi. {str(self.queue_num)} players are in the mogi.")
-                return
+                return 0
 
-            elif name in self.unconfirmed_flattened:
+            # if the person is in an unconfirmed duo
+            elif len([squad for squad in self.unconfirmed_squads if squad.has_player(name)]) > 0:
                 await ctx.send(
                     f"You are in an unconfirmed squad. Check the unconfirmed squads with `!ul` and type `!c @partner` to join the mogi with your squadmate, or `!d` to remove you and your team from the unconfirmed list.")
-                return
+                return 0
             else:
                 self.queue.append(name)
                 self.queue_flat.append(name)
                 await ctx.send(f"{name} has joined the mogi. {str(self.queue_num + 1)} players are in the mogi.")
-                await self.update_queue_num(ctx, 1)
-                return
+                await self.update_queue_num(1)
+                return 1
 
+        # duo queue logic
         else:
-            if partners[0] == partners[1]:
+            if squad_names[0] == squad_names[1]:
                 await ctx.send("You can't make a squad with yourself.")
-                return
+                return 0
 
             if self.queue_num == 11:
                 await ctx.send("You cannot create/confirm a squad when there is only 1 slot in the mogi.")
-                return
+                return 0
 
             if self.queue_num >= 12:
                 await ctx.send("You cannot create/confirm a squad as a substitute")
-                return
+                return 0
 
-            checkList = self.check_list(squad)
-            checkWaiting = self.check_waiting(squad)
-
-            if checkList != None:
-                await ctx.send(f"{checkList} is already in the mogi. They must drop before you can create a squad.")
-                return
-
-            if checkWaiting == False:
+            if len(players_in_event) > 0:
                 await ctx.send(
-                    "One of the players in your squad is in an unconfirmed squad, please drop before trying the command again.")
-                return
+                    f"{players_in_event[0]} is already in the mogi. They must drop before you can create a squad.")
+                return 0
 
-            elif checkWaiting == None:  # Neither are queued
-                self.unconfirmed_squads.append({squad[-1]: "Confirmed", squad[0]: "Unconfirmed"})
-                self.unconfirmed_flattened.extend(squad)
+            squad_status: SquadStatus = self.check_waiting(squad_names)
+
+            if squad_status == SquadStatus.CALLER_IN_OTHER_SQUAD:
                 await ctx.send(
-                    f"Created a squad with {squad[-1]} and {squad[0]}. {squad[0]} must type `!c @{squad[-1]}` to join the mogi.")
-                return
+                    "You are already in an unconfirmed squad, please drop before trying the command again.")
+                return 0
 
-            if isinstance(checkWaiting, dict):
-                unconfirmed_squad = checkWaiting
-                if unconfirmed_squad[name] == "Confirmed":
-                    await ctx.send("You are already confirmed. Your partner must type `!c @Your Name`")
-                    return
-                else:
-                    self.queue.append(squad)
-                    self.queue_flat.extend(squad)
+            if squad_status == SquadStatus.NEITHER_UNCONFIRMED:  # Neither are queued
+                player_1 = SquadPlayer(squad_names[-1], True)
+                player_2 = SquadPlayer(squad_names[0], False)
+                unconfirmed_squad = Squad(player_1, player_2)
+                self.unconfirmed_squads.append(unconfirmed_squad)
+                await ctx.send(
+                    f"Created a squad with {player_1.name} and {player_2.name}. {player_2.name} must type `!c @{player_1.name}` to join the mogi.")
+                return 0
 
-                    await ctx.send(
-                        f"Squad confirmed: `{', '.join(squad)}`. {str(self.queue_num + 2)} players are in the mogi.")
+            if squad_status == SquadStatus.WAITING_ON_PARTNER:
+                await ctx.send("You are already confirmed. Your partner must type `!c @Your Name`")
+                return 0
 
-                    await self.update_queue_num(ctx, 2)
-                    await self.remove_team_unconfirmed(name)
-                    return
+            if squad_status == SquadStatus.CONFIRMING:
+                # this should always be safe
+                confirmed_squad = [squad for squad in self.unconfirmed_squads if squad.has_player(name)][0]
+                confirmed_squad.player_1.confirmed = True
+                confirmed_squad.player_2.confirmed = True
+                self.queue.append(confirmed_squad)
+                self.queue_flat.extend(squad_names)
+
+                await ctx.send(
+                    f"Squad confirmed: `{', '.join(squad_names)}`. {str(self.queue_num + 2)} players are in the mogi.")
+
+                await self.update_queue_num(2)
+                await self.remove_team_unconfirmed(name)
+                return 2
+
+    async def find_and_remove_player(self, ctx: ApplicationContext, name: str) -> List[Member]:
+        users = []
+        for i, item in enumerate(self.queue):
+            if isinstance(item, Squad):
+                # if this squad has the player to delete, remove it
+                if item.has_player(name):
+                    # pop it from the queue
+                    self.queue.pop(i)
+                    # use a list comprehension to set queue_flat to all names that are not in that squad
+                    self.queue_flat = [p_name for p_name in self.queue_flat if not item.has_player(p_name)]
+                    users = fetch_user_objs(ctx, [item.player_1.name, item.player_2.name])
+                    await self.update_queue_num(-2)
+                    break
+            elif item == name:
+                team = [name]
+                users = fetch_user_objs(ctx, [name])
+                self.queue.remove(name)
+                self.queue_flat = [x for x in self.queue_flat if x not in team]
+                await self.update_queue_num(-1)
+                break
+        return users
 
     async def drop(self, ctx):
         if not self.active:
@@ -271,62 +315,34 @@ class Event:
             await ctx.send("You cannot drop from a mogi when it has filled.")
             return
 
-        if name in self.unconfirmed_flattened:
+        name_in_squad = len([squad for squad in self.unconfirmed_squads if squad.has_player(name)]) > 0
+        if name_in_squad:
             await self.remove_team_unconfirmed(name)
             await ctx.send("You have been removed from the unconfirmed squads.")
             return
 
-        if name in self.queue_flat:
-            for i, item in enumerate(self.queue):
-                if isinstance(item, list):
-                    if name in item:
-                        team = item
-                        user = fetch_user_objs(ctx, [item[1]] if item[0] == name else [item[0]])
-                        await ctx.send(
-                            f"{user[0].mention}, your teammate has dropped from the lineup, so you have been removed.")
-                        del self.queue[i]
-                        await self.update_queue_num(ctx, -2)
-                        break
-            else:
-                team = [name]
-                self.queue.remove(name)
-                await self.update_queue_num(ctx, -1)
-            self.queue_flat = [x for x in self.queue_flat if x not in team]
+        users: List[Member] = await self.find_and_remove_player(ctx, name)
+        if len(users) == 2:
+            mention_str = users[1].mention if users[0].display_name == name else users[0].mention
             await ctx.send(
-                f"{name} and has dropped from the mogi. {str(self.queue_num)} players remaining in the mogi.")
-
+                f"{mention_str}, your teammate has dropped from the lineup, so you have been removed.")
+        elif len(users) == 1:
+            await ctx.send(
+                f"{name} has dropped from the mogi. {str(self.queue_num)} players remaining in the mogi.")
         else:
             await ctx.send(
-                f"{name} is already dropped from the mogi {str(self.queue_num)} players remaining in the mogi.")
+                f"{name} is not in the mogi")
 
-    async def remove(self, channel: Channel, number: int) -> str:
+    async def remove(self, ctx: ApplicationContext, number: int) -> str:
+        # To avoid some annoying type errors, this returns a message to be sent in the command
         if not self.active:
-            await channel.send("There is no mogi currently active in this channel, use `!start` to begin one.")
-            return
-
-        if number == None:  # If !r has no arguments
-            await channel.send(f"{get_lineup_str(self.queue)}\nTo remove the 4th player on the list, use `!r 4`")
-
-        number = int(number)
+            return "There is no mogi currently active in this channel, use `!start` to begin one."
 
         if number > len(self.queue_flat) or number < 1:
-            await channel.send("That number is not on the list. Use `!l` to see the players to remove")
+            return "That number is not on the list. Use `!l` to see the players to remove"
 
         name = self.queue_flat[number - 1]
-        for i, item in enumerate(self.queue):
-            if isinstance(item, list):
-                if name in item:
-                    team = item
-                    users = fetch_user_objs(channel, item)
-                    del self.queue[i]
-                    await self.update_queue_num(channel, -2)
-                    break
-        else:
-            team = [name]
-            users = fetch_user_objs(channel, [name])
-            self.queue.remove(name)
-            await self.update_queue_num(channel, -1)
-        self.queue_flat = [x for x in self.queue_flat if x not in team]
+        users = await self.find_and_remove_player(ctx, name)
 
         # note: this return value is only used in the command inside mogi.py
         return f"{', '.join([user.mention for user in users])} has been removed from the mogi. {str(len(self.queue_flat))} players remaining."

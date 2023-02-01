@@ -1,23 +1,20 @@
+import sys
 from typing import List
-
 import discord
 from discord import Message
-from discord.abc import GuildChannel, PrivateChannel
 from discord.ext import commands, tasks
-from datetime import datetime
-from time import time as current_unix_epoch_timestamp
-from discord.types.threads import Thread
-
+from Shared import mogilist_id, mogilist_lu_id
 from cogs.mogi import Mogi
 from model.eventmanager import EventManager
 from secret import bot_key
-from Shared import *
 
-Channel = GuildChannel | Thread | PrivateChannel | None
 intents = discord.Intents.all()
 
 bot = commands.Bot(command_prefix='!', intents=intents, help_command=None, case_insensitive=True)
 event_manager: EventManager = EventManager(bot)
+if len(sys.argv) == 2 and sys.argv[1] == "--test":
+    print("testing mode active")
+    event_manager.testing_mode = True
 
 mogilist_sticky_messages: List[Message] = []
 DEV_BOT_SPAM_CHANNEL_ID = 1011055865895329918
@@ -80,7 +77,7 @@ async def on_command_error(ctx, error):
         embedVar.set_author(
             name=f'Channel: {ctx.channel.name}',
         )
-        channel = bot.get_channel(1011055865895329918)  # dev-bot-spam
+        channel = bot.get_channel(DEV_BOT_SPAM_CHANNEL_ID)  # dev-bot-spam
         await channel.send(embed=embedVar)
 
 
@@ -88,5 +85,4 @@ async def on_command_error(ctx, error):
 bot.load_extension('cogs.mogi')
 mogi_cog = Mogi(bot, event_manager)
 bot.add_cog(mogi_cog)
-
 bot.run(bot_key)

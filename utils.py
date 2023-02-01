@@ -1,10 +1,8 @@
 from typing import List
-
 import discord
 from discord import ApplicationContext, Member
-
 from Shared import moderator_roles
-from main import Channel
+from model.types import Squad
 
 
 def is_moderator(ctx: ApplicationContext) -> bool:
@@ -26,10 +24,10 @@ def get_lineup_str(queue: List[str | List[str]]) -> str:
     increase = 0
     for i, item in enumerate(queue, start=1):
         x = i + increase
-        if isinstance(item, list):
+        if isinstance(item, Squad):
             increase += 1
-            balls = str(item).replace("'", "")[1:-1]
-            string += f"`{str(x)}, {str(x + 1)}. ` {balls}\n"
+            squad_str = f"{item.player_1.name}, {item.player_2.name}"
+            string += f"`{str(x)}, {str(x + 1)}. ` {squad_str}\n"
         else:
             string += f"`{x}.`  {item}\n"
     return string
