@@ -3,7 +3,7 @@ from typing import List
 import discord
 from discord import Message
 from discord.ext import commands, tasks
-from Shared import mogilist_id, mogilist_lu_id
+from Shared import sticky_message_ids
 from cogs.mogi import Mogi
 from model.eventmanager import EventManager
 from secret import bot_key
@@ -17,22 +17,21 @@ if len(sys.argv) == 2 and sys.argv[1] == "--test":
     event_manager.testing_mode = True
 
 mogilist_sticky_messages: List[Message] = []
-DEV_BOT_SPAM_CHANNEL_ID = 1011055865895329918
-
+DEV_BOT_SPAM_CHANNEL_ID = 1073710947107082270
+BOT_ID=1066156513095319625
 
 async def create_sticky_messages():
     """
     This method is called once in on_ready. It's used to initialize sticky messages in two channels. These messages
     are edited in mogilist, which is called every 30 seconds.
     """
-    for channel_id in [mogilist_id, mogilist_lu_id]:
-        channel = bot.get_channel(channel_id)
-        try:
-            sticky_message = await channel.fetch_message(channel.last_message_id)
-            await sticky_message.edit(content="There are no mogis active currently.")
-        except (discord.errors.NotFound, discord.errors.Forbidden) as e:
-            # Forbidden can occur if the most recent message was not the bot's. In this case, just make a new one.
-            sticky_message = await channel.send("There are no mogis active currently.")
+    for channel_id in sticky_message_ids:
+        channel = await bot.get_channel(channel_id).history(limit=10).flatten()
+        for message in channel:
+            if message.author == BOT_ID:
+                sticky_message=message
+                break
+        await sticky_message.edit(content="There are no mogis active currently.")
         mogilist_sticky_messages.append(sticky_message)
 
 
@@ -55,7 +54,7 @@ async def on_ready():
     embed_var.set_author(
         name=f'DuoQueue Bot',
     )
-    channel = bot.get_channel(DEV_BOT_SPAM_CHANNEL_ID)  # dev-bot-spam
+    channel = bot.get_channel(DEV_BOT_SPAM_CHANNEL_ID)
     await channel.send(embed=embed_var)
 
 

@@ -1,4 +1,6 @@
 moderator_roles = ["RT Reporter", "CT Reporter", "RT Updater", "CT Updater", "Developer", "RT Committee",
                    "CT Committee", "Boss"]
-mogilist_id = 1011055867342373052
-mogilist_lu_id = 1011055867342373053
+                   
+with open("sticky_messages.txt") as file:
+    r = file.read()
+    sticky_message_ids = [int(id) for id in r.split("\n")]
