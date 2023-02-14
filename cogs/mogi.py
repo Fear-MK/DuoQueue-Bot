@@ -5,7 +5,6 @@ from discord.ext import commands
 from model.eventmanager import EventManager
 from utils import is_moderator
 
-
 class Mogi(commands.Cog):
     """
     All mogi related commands go in here. This includes:
