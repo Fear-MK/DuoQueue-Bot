@@ -8,7 +8,7 @@ from utils import fetch_user_objs, get_teams_string, get_lineup_str
 
 
 class Event:
-    def __init__(self, channel: Channel):
+    def __init__(self, server_id: int, channel: Channel):
         self.teams_str: str = ""
         self.active = False
         self.full = False
@@ -25,6 +25,7 @@ class Event:
         self.teams = []
 
         self.channel = channel
+        self.server_id = server_id
         self.is_primary_leaderboard = True  # RT/CT
         self.leaderboard_type_str = None
         self.fill_time = None
