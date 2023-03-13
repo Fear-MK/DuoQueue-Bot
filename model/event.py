@@ -4,7 +4,7 @@ import random
 from typing import List
 from discord import ApplicationContext, Member
 from model.types import Channel, SquadStatus, Squad, SquadPlayer
-from utils import fetch_user_objs, get_teams_string, get_lineup_str
+from utils import fetch_user_objs, get_teams_string, get_lineup_str, is_moderator
 
 
 class Event:
@@ -139,16 +139,11 @@ class Event:
             await ctx.send("You must end the current event before starting a new one.")
             return
         self.active = True
-        await ctx.send(
-            f"A new {str(self.team_size)}v{str(self.team_size)} mogi has started, type !c to join solo, or tag a partner to join as a team.")
+        await ctx.send(f"A new {str(self.team_size)}v{str(self.team_size)} mogi has started, type !c to join solo, or tag a partner to join as a team.")
 
     async def next(self, ctx):
-        if self.active:
-            await ctx.send("There is already an active mogi. Use `!esn` if you'd like to start a new one.")
-            return
-
-        # Not sure if I understand the purpose of this. It doesn't actually start a new mogi...
-        await ctx.send("@here A mogi has started. Type `!c` if not currently playing")
+        if is_moderator(ctx):
+            await ctx.send("@here A mogi has started. Type `!c` if not currently playing")
 
     async def ping(self, ctx):
 
@@ -160,10 +155,18 @@ class Event:
             await ctx.message.delete()
             await ctx.send(f"@here +{number}")
 
+    async def notify(self, ctx: ApplicationContext):
+        if is_moderator(ctx):
+            message = " ".join(ctx.message.content.split(" ")[1:])
+            users = fetch_user_objs(self.queue_flat)
+            await ctx.send(f"{[user.mention for user in users]} {message}")
+
+        
+
     async def lineup(self, ctx: ApplicationContext, permanent: bool):
         lineup_str = get_lineup_str(self.queue)
         if not self.active:
-            await ctx.send("There is no active mogi in this channel. Use `!s` to start one")
+            await ctx.send("There is no active mogi in this channel. Use `!start` to start one")
             return
         if permanent:
             await ctx.send(

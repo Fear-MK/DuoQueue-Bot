@@ -2,7 +2,7 @@ import asyncio
 from typing import List
 from discord import Bot, ApplicationContext, Member
 from discord.ext import commands
-from model.eventmanager import EventManager
+from model.manager import EventManager
 from utils import is_moderator
 
 class Mogi(commands.Cog):
@@ -28,7 +28,7 @@ class Mogi(commands.Cog):
 
     @commands.command()
     async def start(self, ctx: ApplicationContext):
-        event = self._event_manager.get_event(ctx.channel.id)
+        event = self._event_manager.get_event(ctx.guild.id, ctx.channel.id)
         await event.start_mogi(ctx)
 
     @commands.command()
@@ -40,7 +40,7 @@ class Mogi(commands.Cog):
         if not is_moderator(ctx):
             await ctx.send("Only moderators can call `!next` directly.")
             return
-        event = self._event_manager.get_event(ctx.channel.id)
+        event = self._event_manager.get_event(ctx.guild.id, ctx.channel.id)
         await event.next(ctx)
 
     @commands.command(aliases=["esn"])
@@ -49,15 +49,22 @@ class Mogi(commands.Cog):
         # otherwise we will be holding onto a reference to an event that has been invalidated
         # (gone from the event manager's dictionary)
         await asyncio.gather(self._event_manager.end_mogi(ctx), asyncio.sleep(1))
-        event = self._event_manager.get_event(ctx.channel.id)
+        event = self._event_manager.get_event(ctx.guild.id, ctx.channel.id)
         await event.start_mogi(ctx)
-        await event.next(ctx)
+        is_mod=await event.next(ctx)
+        if not is_mod:
+            await ctx.send("A mogi has started. Type `!c` if not currently playing")
 
     @commands.command(aliases=["p"])
     @commands.cooldown(1, 900, commands.BucketType.channel)
     async def ping(self, ctx: ApplicationContext):
-        event = self._event_manager.get_event(ctx.channel.id)
+        event = self._event_manager.get_event(ctx.guild.id, ctx.channel.id)
         await event.ping(ctx)
+    
+    @commands.command()
+    async def notify(self, ctx: ApplicationContext):
+        event = self._event_manager.get_event(ctx.guild.id, ctx.channel.id)
+        await event.ping
 
     @commands.command(aliases=["r"])
     async def remove(self, ctx: ApplicationContext, number: int = -1):
@@ -67,7 +74,7 @@ class Mogi(commands.Cog):
         if number == -1:
             await ctx.send("You need to specify a number indicated by `!l`.")
             return
-        event = self._event_manager.get_event(ctx.channel.id)
+        event = self._event_manager.get_event(ctx.guild.id, ctx.channel.id)
         msg = await event.remove(ctx, number)
         await ctx.send(msg)
 
@@ -84,32 +91,32 @@ class Mogi(commands.Cog):
 
     @commands.command(aliases=["d"])
     async def drop(self, ctx: ApplicationContext):
-        event = self._event_manager.get_event(ctx.channel.id)
+        event = self._event_manager.get_event(ctx.guild.id, ctx.channel.id)
         await event.drop(ctx)
 
     @commands.command(aliases=["list", "l"])
     @commands.cooldown(1, 30, commands.BucketType.channel)
     async def lineup(self, ctx: ApplicationContext):
-        event = self._event_manager.get_event(ctx.channel.id)
+        event = self._event_manager.get_event(ctx.guild.id, ctx.channel.id)
         await event.lineup(ctx, True)
 
     @commands.command()
     @commands.cooldown(1, 15, commands.BucketType.channel)
     async def s(self, ctx: ApplicationContext):
         # this is the same as lineup, but it deletes the message after 10 seconds
-        event = self._event_manager.get_event(ctx.channel.id)
+        event = self._event_manager.get_event(ctx.guild.id, ctx.channel.id)
         await event.lineup(ctx, False)
 
     @commands.command()
     @commands.cooldown(1, 15, commands.BucketType.channel)
     async def teams(self, ctx: ApplicationContext):
-        event = self._event_manager.get_event(ctx.channel.id)
+        event = self._event_manager.get_event(ctx.guild.id, ctx.channel.id)
         await event.post_teams(ctx)
 
     @commands.command(aliases=["ul"])
     @commands.cooldown(1, 15)
     async def unconfirmedlineup(self, ctx: ApplicationContext):
-        event = self._event_manager.get_event(ctx.channel.id)
+        event = self._event_manager.get_event(ctx.guild.id, ctx.channel.id)
         await event.unconfirmed_lineup(ctx)
 
 

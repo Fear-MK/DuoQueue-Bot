@@ -3,8 +3,8 @@ from model.types import Channel, SquadPlayer, Squad
 
 
 class TestEvent(Event):
-    def __init__(self, channel: Channel):
-        super().__init__(channel)
+    def __init__(self, server_id: int, channel: Channel):
+        super().__init__(server_id, channel)
         players = ['test1', 'test2', 'test3', 'test4', 'test5', 'test6',
                    'test7', 'test8', 'test9', 'test10', 'test11']
         self.queue_flat = [player for player in players]

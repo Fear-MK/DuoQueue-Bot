@@ -3,15 +3,19 @@ from typing import List
 import discord
 from discord import Message
 from discord.ext import commands, tasks
+
 from Shared import sticky_message_ids
 from cogs.mogi import Mogi
-from model.eventmanager import EventManager
+from cogs.admin import Admin
+from model.serversettings import ServerSettings
+from model.manager import EventManager
 from secret import bot_key
 
 intents = discord.Intents.all()
 
 bot = commands.Bot(command_prefix='!', intents=intents, help_command=None, case_insensitive=True)
 event_manager: EventManager = EventManager(bot)
+settings_manager: ServerSettings = ServerSettings(bot)
 if len(sys.argv) == 2 and sys.argv[1] == "--test":
     print("testing mode active")
     event_manager.testing_mode = True
@@ -84,4 +88,6 @@ async def on_command_error(ctx, error):
 bot.load_extension('cogs.mogi')
 mogi_cog = Mogi(bot, event_manager)
 bot.add_cog(mogi_cog)
+bot.load_extension('cogs.admin')
+admin_cog = Admin(bot, )
 bot.run(bot_key)
